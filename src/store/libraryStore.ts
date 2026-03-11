@@ -80,7 +80,6 @@ export const useLibraryStore = create<LibraryStore>((set, get) => ({
       isExpanded: true,
     };
     await _svc.saveFolder(folder);
-    set(state => ({ folders: [...state.folders, folder] }));
   },
 
   renameFolder: async (id, name) => {
@@ -149,7 +148,6 @@ export const useLibraryStore = create<LibraryStore>((set, get) => ({
       updatedAt: Date.now(),
     };
     await _svc.saveBook(book);
-    set(state => ({ books: [...state.books, book] }));
   },
 
   deleteBook: async (id) => {
