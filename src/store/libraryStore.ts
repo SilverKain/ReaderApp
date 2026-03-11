@@ -1,7 +1,14 @@
 import { create } from 'zustand';
 import type { Book, Folder } from '../types';
-import dbService from '../services/storage';
+import type { DatabaseService } from '../services/database';
 import { generateId } from '../utils/helpers';
+
+// Module-level refs: active service + real-time unsubscribe functions
+let _svc: DatabaseService | null = null;
+let _unsubFolders: (() => void) | null = null;
+let _unsubBooks: (() => void) | null = null;
+let _foldersReady = false;
+let _booksReady = false;
 
 interface LibraryStore {
   folders: Folder[];
@@ -9,7 +16,8 @@ interface LibraryStore {
   currentBookId: string | null;
   isLoaded: boolean;
 
-  initialize: () => Promise<void>;
+  initialize: (service: DatabaseService) => void;
+  cleanup: () => void;
 
   // Folder actions
   addFolder: (name: string, parentId?: string | null) => Promise<void>;
@@ -32,16 +40,38 @@ export const useLibraryStore = create<LibraryStore>((set, get) => ({
   currentBookId: null,
   isLoaded: false,
 
-  initialize: async () => {
-    await dbService.initialize();
-    const [folders, books] = await Promise.all([
-      dbService.getFolders(),
-      dbService.getBooks(),
-    ]);
-    set({ folders, books, isLoaded: true });
+  initialize: (service: DatabaseService) => {
+    _unsubFolders?.();
+    _unsubBooks?.();
+    _foldersReady = false;
+    _booksReady = false;
+    _svc = service;
+    set({ isLoaded: false, folders: [], books: [] });
+
+    _unsubFolders = service.subscribeToFolders((folders) => {
+      _foldersReady = true;
+      set({ folders, isLoaded: _foldersReady && _booksReady });
+    });
+
+    _unsubBooks = service.subscribeToBooks((books) => {
+      _booksReady = true;
+      set({ books, isLoaded: _foldersReady && _booksReady });
+    });
+  },
+
+  cleanup: () => {
+    _unsubFolders?.();
+    _unsubBooks?.();
+    _unsubFolders = null;
+    _unsubBooks = null;
+    _svc = null;
+    _foldersReady = false;
+    _booksReady = false;
+    set({ folders: [], books: [], currentBookId: null, isLoaded: false });
   },
 
   addFolder: async (name, parentId = null) => {
+    if (!_svc) return;
     const folder: Folder = {
       id: generateId(),
       name,
@@ -49,15 +79,16 @@ export const useLibraryStore = create<LibraryStore>((set, get) => ({
       createdAt: Date.now(),
       isExpanded: true,
     };
-    await dbService.saveFolder(folder);
+    await _svc.saveFolder(folder);
     set(state => ({ folders: [...state.folders, folder] }));
   },
 
   renameFolder: async (id, name) => {
+    if (!_svc) return;
     const folder = get().folders.find(f => f.id === id);
     if (!folder) return;
     const updated = { ...folder, name };
-    await dbService.updateFolder(updated);
+    await _svc.updateFolder(updated);
     set(state => ({
       folders: state.folders.map(f => f.id === id ? updated : f),
     }));
@@ -75,9 +106,10 @@ export const useLibraryStore = create<LibraryStore>((set, get) => ({
     );
     const bookIdsToDelete = new Set(booksToDelete.map(b => b.id));
 
+    if (!_svc) return;
     await Promise.all([
-      ...[...folderIds].map(fid => dbService.deleteFolder(fid)),
-      ...booksToDelete.map(b => dbService.deleteBook(b.id)),
+      ...[...folderIds].map(fid => _svc!.deleteFolder(fid)),
+      ...booksToDelete.map(b => _svc!.deleteBook(b.id)),
     ]);
 
     set(state => ({
@@ -96,14 +128,15 @@ export const useLibraryStore = create<LibraryStore>((set, get) => ({
         f.id === id ? { ...f, isExpanded: !f.isExpanded } : f
       );
       const updatedFolder = updatedFolders.find(f => f.id === id);
-      if (updatedFolder) {
-        dbService.updateFolder(updatedFolder);
+      if (updatedFolder && _svc) {
+        _svc.updateFolder(updatedFolder);
       }
       return { folders: updatedFolders };
     });
   },
 
   uploadBook: async (file, folderId = null) => {
+    if (!_svc) return;
     const content = await file.text();
     const title = file.name.replace(/\.md$/i, '');
     const book: Book = {
@@ -115,12 +148,13 @@ export const useLibraryStore = create<LibraryStore>((set, get) => ({
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
-    await dbService.saveBook(book);
+    await _svc.saveBook(book);
     set(state => ({ books: [...state.books, book] }));
   },
 
   deleteBook: async (id) => {
-    await dbService.deleteBook(id);
+    if (!_svc) return;
+    await _svc.deleteBook(id);
     set(state => ({
       books: state.books.filter(b => b.id !== id),
       currentBookId: state.currentBookId === id ? null : state.currentBookId,
@@ -128,7 +162,8 @@ export const useLibraryStore = create<LibraryStore>((set, get) => ({
   },
 
   moveBook: async (bookId, folderId) => {
-    await dbService.updateBook({ id: bookId, folderId, updatedAt: Date.now() });
+    if (!_svc) return;
+    await _svc.updateBook({ id: bookId, folderId, updatedAt: Date.now() });
     set(state => ({
       books: state.books.map(b =>
         b.id === bookId ? { ...b, folderId, updatedAt: Date.now() } : b
@@ -141,7 +176,8 @@ export const useLibraryStore = create<LibraryStore>((set, get) => ({
   },
 
   updateReadingPosition: async (bookId, position) => {
-    await dbService.updateBook({ id: bookId, lastReadPosition: position });
+    if (!_svc) return;
+    await _svc.updateBook({ id: bookId, lastReadPosition: position });
     set(state => ({
       books: state.books.map(b =>
         b.id === bookId ? { ...b, lastReadPosition: position } : b
@@ -150,7 +186,8 @@ export const useLibraryStore = create<LibraryStore>((set, get) => ({
   },
 
   renameBook: async (id, title) => {
-    await dbService.updateBook({ id, title, updatedAt: Date.now() });
+    if (!_svc) return;
+    await _svc.updateBook({ id, title, updatedAt: Date.now() });
     set(state => ({
       books: state.books.map(b =>
         b.id === id ? { ...b, title, updatedAt: Date.now() } : b

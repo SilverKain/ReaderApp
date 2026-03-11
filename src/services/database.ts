@@ -2,10 +2,18 @@ import type { Book, Folder } from '../types';
 
 /**
  * Abstract database interface.
- * Replace IndexedDBService with FirebaseService to migrate to cloud storage.
+ * Implementations:
+ *   - IndexedDBService (offline, local)
+ *   - FirestoreService (cloud, real-time sync)
  */
 export interface DatabaseService {
   initialize(): Promise<void>;
+
+  /** Subscribe to real-time folder updates. Returns unsubscribe function. */
+  subscribeToFolders(callback: (folders: Folder[]) => void): () => void;
+
+  /** Subscribe to real-time book updates. Returns unsubscribe function. */
+  subscribeToBooks(callback: (books: Book[]) => void): () => void;
 
   // Folders
   getFolders(): Promise<Folder[]>;

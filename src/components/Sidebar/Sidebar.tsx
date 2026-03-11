@@ -14,6 +14,7 @@ import { FolderTree } from './FolderTree';
 import { UploadButton } from './UploadButton';
 import { SearchBar } from '../UI/SearchBar';
 import { Modal, ModalInputForm } from '../UI/Modal';
+import { UserMenu } from '../Auth/UserMenu';
 
 interface SidebarProps {
   onNavigate?: () => void;
@@ -138,6 +139,11 @@ export function Sidebar({ onNavigate }: SidebarProps) {
               <FolderPlus size={15} />
               Создать папку
             </button>
+          </div>
+
+          {/* User account */}
+          <div className="px-3 pb-3 border-t border-gray-200 dark:border-gray-700 pt-3 flex-shrink-0">
+            <UserMenu />
           </div>
         </>
       )}

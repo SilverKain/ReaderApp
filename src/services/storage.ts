@@ -28,6 +28,17 @@ class IndexedDBService implements DatabaseService {
     await getDB();
   }
 
+  subscribeToFolders(callback: (folders: Folder[]) => void): () => void {
+    // IndexedDB has no real-time — fire once with initial data
+    this.getFolders().then(callback);
+    return () => {};
+  }
+
+  subscribeToBooks(callback: (books: Book[]) => void): () => void {
+    this.getBooks().then(callback);
+    return () => {};
+  }
+
   async getFolders(): Promise<Folder[]> {
     const db = await getDB();
     return db.getAll('folders');
